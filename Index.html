@@ -1,0 +1,2169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>Nexa AI</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0B0B14; overscroll-behavior: none; }
+  #root { height: 100vh; width: 100vw; overflow: hidden; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- localStorage-backed shim matching the window.storage API used inside the Claude artifact sandbox -->
+<script>
+(function () {
+  const PREFIX = "nexa_standalone:";
+  window.storage = {
+    async get(key) {
+      const v = localStorage.getItem(PREFIX + key);
+      if (v === null) return null;
+      return { key, value: v };
+    },
+    async set(key, value) {
+      localStorage.setItem(PREFIX + key, value);
+      return { key, value };
+    },
+    async delete(key) {
+      localStorage.removeItem(PREFIX + key);
+      return { key, deleted: true };
+    },
+    async list(prefix) {
+      const p = PREFIX + (prefix || "");
+      const keys = Object.keys(localStorage).filter((k) => k.startsWith(p)).map((k) => k.slice(PREFIX.length));
+      return { keys };
+    },
+  };
+})();
+</script>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react" data-type="module">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ---- minimal inline-SVG icon set (standalone build has no lucide-react CDN dependency) ---- */
+const ICON_PATHS = {
+  send: "M22 2 11 13 M22 2 15 22 11 13 2 9 22 2Z",
+  square: "M4 4h16v16H4z",
+  rotateccw: "M3 12a9 9 0 1 0 3-6.7 M3 3v6h6",
+  copy: "M9 9h11v11H9z M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",
+  check: "M20 6 9 17l-5-5",
+  pencil: "M12 20h9 M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z",
+  trash2: "M3 6h18 M8 6V4h8v2 M19 6l-1 14H6L5 6 M10 11v6 M14 11v6",
+  pin: "M12 2a5 5 0 0 0-5 5c0 4 5 11 5 11s5-7 5-11a5 5 0 0 0-5-5Z",
+  pinoff: "M12 2a5 5 0 0 0-5 5c0 4 5 11 5 11s5-7 5-11a5 5 0 0 0-5-5Z M3 3l18 18",
+  plus: "M12 5v14 M5 12h14",
+  search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z M21 21l-4.3-4.3",
+  menu: "M3 6h18 M3 12h18 M3 18h18",
+  x: "M18 6 6 18 M6 6l12 12",
+  settings: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z M4 12h2m12 0h2M12 4v2m0 12v2M6.3 6.3l1.4 1.4m8.6 8.6 1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4",
+  brain: "M9 4a3 3 0 0 0-3 3v1a3 3 0 0 0-2 5v1a3 3 0 0 0 3 3h1v2a3 3 0 0 0 6 0v-2h1a3 3 0 0 0 3-3v-1a3 3 0 0 0-2-5V7a3 3 0 0 0-3-3H9Z",
+  mic: "M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z M5 11a7 7 0 0 0 14 0 M12 18v4",
+  micoff: "M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z M5 11a7 7 0 0 0 14 0 M12 18v4 M2 2l20 20",
+  volume2: "M4 9v6h4l5 5V4L8 9H4Z M17 8a5 5 0 0 1 0 8 M19.5 5.5a9 9 0 0 1 0 13",
+  volumex: "M4 9v6h4l5 5V4L8 9H4Z M17 9l5 6 M22 9l-5 6",
+  paperclip: "M21 11 12 20a4 4 0 0 1-6-6l9-9a3 3 0 0 1 4 4l-9 9a1 1 0 0 1-2-2l8-8",
+  filetext: "M6 2h9l5 5v15H6z M15 2v5h5 M9 13h6 M9 17h6",
+  download: "M12 3v13 M7 11l5 5 5-5 M5 20h14",
+  alertcircle: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z M12 8v5 M12 16.5v.1",
+  sun: "M12 5v-2 M12 21v-2 M5 12h-2 M21 12h-2 M6.3 6.3 4.9 4.9 M19.1 19.1l-1.4-1.4 M6.3 17.7l-1.4 1.4 M19.1 4.9l-1.4 1.4 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
+  moon: "M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z",
+  monitor: "M3 4h18v12H3z M8 20h8 M12 16v4",
+  chevrondown: "M6 9l6 6 6-6",
+  chevronup: "M18 15l-6-6-6 6",
+  chevronright: "M9 6l6 6-6 6",
+  chevronleft: "M15 6l-6 6 6 6",
+  arrowleft: "M19 12H5 M12 19l-7-7 7-7",
+  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M4 21c1.5-4 5-6 8-6s6.5 2 8 6",
+  slidershorizontal: "M4 6h7 M15 6h5 M4 12h11 M19 12h1 M4 18h3 M11 18h9 M11 4v4 M19 10v4 M7 16v4",
+  bell: "M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z M9.5 19a2.5 2.5 0 0 0 5 0",
+  shield: "M12 2 4 5v6c0 5 4 9 8 11 4-2 8-6 8-11V5Z",
+  share2: "M18 5a3 3 0 1 0-6 0 3 3 0 0 0 6 0Z M6 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z M18 19a3 3 0 1 0-6 0 3 3 0 0 0 6 0Z M8.6 10.5l6.8-3.8 M8.6 13.5l6.8 3.8",
+  type: "M4 5h16 M12 5v14 M9 19h6",
+  sparkles: "M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2Z M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z",
+  phone: "M4 4h4l2 5-2.5 1.5a12 12 0 0 0 6 6L15 14l5 2v4a2 2 0 0 1-2 2C9 22 2 15 2 6a2 2 0 0 1 2-2Z",
+  image: "M4 4h16v16H4z M9 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z M4 16l5-5 4 4 3-3 4 4",
+  uploadcloud: "M17 16a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.7 1.5A4 4 0 0 0 7 17h1 M12 20v-8 M9 15l3-3 3 3",
+};
+function Icon({ name, size = 18, color = "currentColor", fill = "none", strokeWidth = 2, style }) {
+  const d = ICON_PATHS[name] || "";
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: "inline-block", flexShrink: 0, ...style }}>
+      {d.split(" M").map((seg, i) => (
+        <path key={i} d={(i === 0 ? seg : "M" + seg)} fill={fill} stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      ))}
+    </svg>
+  );
+}
+const mk = (name) => (props) => <Icon name={name} {...props} />;
+const Send = mk("send"), Square = mk("square"), RotateCcw = mk("rotateccw"), Copy = mk("copy"), Check = mk("check"),
+  Pencil = mk("pencil"), Trash2 = mk("trash2"), Pin = mk("pin"), PinOff = mk("pinoff"), Plus = mk("plus"),
+  Search = mk("search"), Menu = mk("menu"), X = mk("x"), Settings = mk("settings"), Brain = mk("brain"),
+  Mic = mk("mic"), MicOff = mk("micoff"), Volume2 = mk("volume2"), VolumeX = mk("volumex"),
+  Paperclip = mk("paperclip"), FileText = mk("filetext"), Download = mk("download"), AlertCircle = mk("alertcircle"),
+  Sun = mk("sun"), Moon = mk("moon"), Monitor = mk("monitor"), ChevronDown = mk("chevrondown"),
+  User = mk("user"), SlidersHorizontal = mk("slidershorizontal"), Bell = mk("bell"), Shield = mk("shield"),
+  Share2 = mk("share2"), Type = mk("type"), ChevronRight = mk("chevronright"), ArrowLeft = mk("arrowleft"),
+  Sparkles = mk("sparkles"), Phone = mk("phone"), ImageIcon = mk("image"), UploadCloud = mk("uploadcloud"),
+  ChevronLeft = mk("chevronleft"), ChevronUpIcon = mk("chevronup");
+
+/* ---------- palette ----------
+   Ink navy ground (#12151C), warm brass accent (#C99A4B), a second cool
+   signal color for "live" states (#5FB4A2), bone text (#EDEAE2).
+   Display face: a condensed slab for headers; body: a plain humanist sans;
+   utility/mono: for code + metadata. Signature element: the brass "pulse"
+   dot sequence next to the model name that animates while streaming — a
+   ledger-style ticking cursor rather than a generic spinner.
+------------------------------- */
+
+const COLORS = {
+  bgDark: "#0B0B14", bgDark2: "#12121F", bgDark3: "#1B1B2E",
+  bgLight: "#F7F5F0", bgLight2: "#FFFFFF", bgLight3: "#ECE8DF",
+  brass: "#C99A4B", brassDim: "#8A6B37",
+  teal: "#5FB4A2",
+  violet: "#8B5CF6", violet2: "#4F8EF7", violetSoft: "rgba(139,92,246,0.35)",
+  textDark: "#EDEAE2", textDarkDim: "#9A9FAE",
+  textLight: "#1C1E24", textLightDim: "#6B6F7B",
+  danger: "#D0685A", border: "rgba(255,255,255,0.08)", borderLight: "rgba(0,0,0,0.08)",
+};
+
+/* =====================================================================
+   PASTE YOUR OWN API KEY(S) HERE — for your personal use on your own
+   device only. Do NOT share this file with anyone else once you've
+   filled these in, since whoever opens the file can read the key.
+   Leave a value as "" to keep using the Settings screen instead.
+   ===================================================================== */
+const DEFAULT_CLAUDE_KEY = "";   // e.g. "sk-ant-..."   from console.anthropic.com
+const DEFAULT_GEMINI_KEY = "";   // e.g. "AIzaSy..."     from aistudio.google.com/apikey
+const DEFAULT_OPENAI_KEY = "";   // e.g. "sk-..."        from platform.openai.com (used for DALL·E image generation only)
+/* ===================================================================== */
+
+const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+const now = () => Date.now();
+
+function useTheme() {
+  const [theme, setTheme] = useState("dark"); // 'dark' | 'light' | 'system'
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get("nexa:theme");
+        if (r && r.value) setTheme(r.value);
+      } catch (e) {}
+      setLoaded(true);
+    })();
+  }, []);
+  useEffect(() => {
+    if (!loaded) return;
+    window.storage.set("nexa:theme", theme).catch(() => {});
+  }, [theme, loaded]);
+  const [systemDark, setSystemDark] = useState(true);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemDark(mq.matches);
+    const fn = (e) => setSystemDark(e.matches);
+    mq.addEventListener("change", fn);
+    return () => mq.removeEventListener("change", fn);
+  }, []);
+  const dark = theme === "system" ? systemDark : theme === "dark";
+  return { theme, setTheme, dark };
+}
+
+const STT_LANGUAGES = [
+  ["en-US", "English (US)"], ["en-GB", "English (UK)"], ["en-IN", "English (India)"],
+  ["hi-IN", "Hindi"], ["ur-PK", "Urdu (Pakistan)"], ["ur-IN", "Urdu (India)"],
+  ["ar-SA", "Arabic (Saudi)"], ["ar-EG", "Arabic (Egypt)"], ["bn-BD", "Bengali"],
+  ["pa-IN", "Punjabi"], ["ta-IN", "Tamil"], ["te-IN", "Telugu"], ["mr-IN", "Marathi"],
+  ["gu-IN", "Gujarati"], ["kn-IN", "Kannada"], ["ml-IN", "Malayalam"], ["ne-NP", "Nepali"],
+  ["si-LK", "Sinhala"], ["fa-IR", "Persian"], ["tr-TR", "Turkish"], ["he-IL", "Hebrew"],
+  ["es-ES", "Spanish (Spain)"], ["es-MX", "Spanish (Mexico)"], ["es-AR", "Spanish (Argentina)"],
+  ["pt-BR", "Portuguese (Brazil)"], ["pt-PT", "Portuguese (Portugal)"], ["fr-FR", "French"],
+  ["fr-CA", "French (Canada)"], ["de-DE", "German"], ["it-IT", "Italian"], ["nl-NL", "Dutch"],
+  ["pl-PL", "Polish"], ["ro-RO", "Romanian"], ["hu-HU", "Hungarian"], ["cs-CZ", "Czech"],
+  ["sk-SK", "Slovak"], ["sv-SE", "Swedish"], ["da-DK", "Danish"], ["no-NO", "Norwegian"],
+  ["fi-FI", "Finnish"], ["el-GR", "Greek"], ["bg-BG", "Bulgarian"], ["uk-UA", "Ukrainian"],
+  ["ru-RU", "Russian"], ["sr-RS", "Serbian"], ["hr-HR", "Croatian"], ["sl-SI", "Slovenian"],
+  ["lt-LT", "Lithuanian"], ["lv-LV", "Latvian"], ["et-EE", "Estonian"], ["sq-AL", "Albanian"],
+  ["zh-CN", "Chinese (Mandarin, Simplified)"], ["zh-TW", "Chinese (Taiwan)"], ["yue-HK", "Cantonese"],
+  ["ja-JP", "Japanese"], ["ko-KR", "Korean"], ["vi-VN", "Vietnamese"], ["th-TH", "Thai"],
+  ["id-ID", "Indonesian"], ["ms-MY", "Malay"], ["fil-PH", "Filipino"], ["km-KH", "Khmer"],
+  ["lo-LA", "Lao"], ["my-MM", "Burmese"], ["sw-KE", "Swahili"], ["am-ET", "Amharic"],
+  ["ha-NG", "Hausa"], ["yo-NG", "Yoruba"], ["zu-ZA", "Zulu"], ["af-ZA", "Afrikaans"],
+  ["is-IS", "Icelandic"], ["ga-IE", "Irish"], ["cy-GB", "Welsh"], ["mt-MT", "Maltese"],
+  ["ka-GE", "Georgian"], ["hy-AM", "Armenian"], ["az-AZ", "Azerbaijani"], ["kk-KZ", "Kazakh"],
+  ["uz-UZ", "Uzbek"], ["mn-MN", "Mongolian"],];
+
+function useStars(count = 24) {
+  const [stars] = useState(() =>
+    Array.from({ length: count }, () => ({
+      x: Math.random() * 55, y: Math.random() * 45,
+      size: 1 + Math.random() * 2.5, delay: Math.random() * 3, dur: 2 + Math.random() * 2.5,
+    }))
+  );
+  return stars;
+}
+
+function fileToText(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error("Could not read file"));
+    r.readAsText(file);
+  });
+}
+
+function chunkText(text, size = 700) {
+  const chunks = [];
+  for (let i = 0; i < text.length; i += size) chunks.push(text.slice(i, i + size));
+  return chunks;
+}
+
+function scoreChunk(chunk, queryWords) {
+  const lower = chunk.toLowerCase();
+  let score = 0;
+  for (const w of queryWords) if (w.length > 2 && lower.includes(w)) score++;
+  return score;
+}
+
+function topChunksForQuery(files, query, k = 4) {
+  const words = query.toLowerCase().split(/\W+/).filter(Boolean);
+  const scored = [];
+  for (const f of files) {
+    for (const c of f.chunks) {
+      const s = scoreChunk(c, words);
+      if (s > 0) scored.push({ file: f.name, text: c, score: s });
+    }
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, k);
+}
+
+// --- lightweight markdown-ish renderer: code fences + inline code + bold/italic ---
+function renderContent(text, onCopyCode) {
+  const parts = text.split(/```/g);
+  const nodes = [];
+  parts.forEach((part, i) => {
+    if (i % 2 === 1) {
+      const nl = part.indexOf("\n");
+      const lang = nl === -1 ? "" : part.slice(0, nl).trim();
+      const code = nl === -1 ? part : part.slice(nl + 1);
+      nodes.push(
+        <CodeBlock key={i} lang={lang} code={code.replace(/\n$/, "")} onCopy={onCopyCode} />
+      );
+    } else if (part) {
+      const lines = part.split("\n");
+      nodes.push(
+        <p key={i} style={{ margin: "0 0 8px 0", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
+          {lines.map((line, li) => {
+            const segs = line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+            return (
+              <React.Fragment key={li}>
+                {segs.map((seg, si) => {
+                  if (seg.startsWith("**") && seg.endsWith("**")) {
+                    return <strong key={si}>{seg.slice(2, -2)}</strong>;
+                  }
+                  if (seg.startsWith("`") && seg.endsWith("`")) {
+                    return (
+                      <code key={si} style={{
+                        background: "rgba(139,92,246,0.15)", padding: "1px 5px",
+                        borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: "0.9em"
+                      }}>{seg.slice(1, -1)}</code>
+                    );
+                  }
+                  return <span key={si}>{seg}</span>;
+                })}
+                {li < lines.length - 1 && <br />}
+              </React.Fragment>
+            );
+          })}
+        </p>
+      );
+    }
+  });
+  return nodes;
+}
+
+function CodeBlock({ lang, code, onCopy }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div style={{
+      background: "#0D0F14", borderRadius: 10, overflow: "hidden", margin: "8px 0",
+      border: "1px solid rgba(255,255,255,0.08)"
+    }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "6px 12px", background: "rgba(255,255,255,0.03)",
+        fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#9A9FAE"
+      }}>
+        <span>{lang || "text"}</span>
+        <button
+          onClick={() => { onCopy(code); setCopied(true); setTimeout(() => setCopied(false), 1400); }}
+          style={{ background: "none", border: "none", color: "#9A9FAE", cursor: "pointer", display: "flex", gap: 4, alignItems: "center", fontSize: 12 }}
+        >
+          {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre style={{ margin: 0, padding: 12, overflowX: "auto" }}>
+        <code style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#D7DAE0", whiteSpace: "pre" }}>
+          {code}
+        </code>
+      </pre>
+    </div>
+  );
+}
+
+function NexaAI() {
+  const { theme, setTheme, dark } = useTheme();
+  const c = {
+    bg: dark ? COLORS.bgDark : COLORS.bgLight,
+    bg2: dark ? COLORS.bgDark2 : COLORS.bgLight2,
+    bg3: dark ? COLORS.bgDark3 : COLORS.bgLight3,
+    text: dark ? COLORS.textDark : COLORS.textLight,
+    textDim: dark ? COLORS.textDarkDim : COLORS.textLightDim,
+    border: dark ? COLORS.border : COLORS.borderLight,
+  };
+
+  const [booted, setBooted] = useState(false);
+  const [chats, setChats] = useState([]);
+  const [currentChatId, setCurrentChatId] = useState(null);
+  const [input, setInput] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [memory, setMemory] = useState([]);
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
+  const [settings, setSettings] = useState({
+    temperature: 0.7, style: "balanced", autoplay: false, rate: 1, voiceURI: "", openaiKey: DEFAULT_OPENAI_KEY,
+    fontStyle: "default", profileName: "", capImageGen: true, capVoiceIn: true, capVoiceOut: true,
+    notifyOnReply: false, geminiKey: DEFAULT_GEMINI_KEY, useGemini: !!DEFAULT_GEMINI_KEY && !DEFAULT_CLAUDE_KEY,
+    sttLang: "en-US", claudeKey: DEFAULT_CLAUDE_KEY, layoutStyle: "minimal",
+  });
+  const [settingsPage, setSettingsPage] = useState("main");
+  const [files, setFiles] = useState([]);
+  const [errorBanner, setErrorBanner] = useState("");
+  const [listening, setListening] = useState(false);
+  const [speakingId, setSpeakingId] = useState(null);
+  const [voices, setVoices] = useState([]);
+  const [dockOpen, setDockOpen] = useState(true);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [showPlusInfo, setShowPlusInfo] = useState(false);
+  const [showWelcomeSetup, setShowWelcomeSetup] = useState(false);
+  const [dockPos, setDockPos] = useState(null); // {x,y} once user drags it; null = default position
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const stars = useStars(28);
+
+  const abortRef = useRef(null);
+  const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const scrollRef = useRef(null);
+  const recognitionRef = useRef(null);
+
+  const currentChat = chats.find((ch) => ch.id === currentChatId) || null;
+
+  // ---- boot: load persisted state ----
+  useEffect(() => {
+    (async () => {
+      try {
+        const [chatsR, memR, setR, dockR] = await Promise.allSettled([
+          window.storage.get("nexa:chats"),
+          window.storage.get("nexa:memory"),
+          window.storage.get("nexa:settings"),
+          window.storage.get("nexa:dockpos"),
+        ]);
+        let loadedChats = [];
+        if (chatsR.status === "fulfilled" && chatsR.value) loadedChats = JSON.parse(chatsR.value.value);
+        if (!loadedChats.length) {
+          const id = uid();
+          loadedChats = [{ id, title: "New chat", pinned: false, messages: [], createdAt: now() }];
+        }
+        setChats(loadedChats);
+        setCurrentChatId(loadedChats[0].id);
+        if (memR.status === "fulfilled" && memR.value) setMemory(JSON.parse(memR.value.value));
+        if (setR.status === "fulfilled" && setR.value) {
+          const s = JSON.parse(setR.value.value);
+          setSettings((prev) => ({ ...prev, ...s }));
+          if (typeof s.memoryEnabled === "boolean") setMemoryEnabled(s.memoryEnabled);
+        }
+        if (dockR.status === "fulfilled" && dockR.value) setDockPos(JSON.parse(dockR.value.value));
+try { const s = JSON.parse(setR.value.value); return !!(s.claudeKey || s.geminiKey); } catch (e) { return false; }
+        })();
+        if (!hasSavedKey && !DEFAULT_CLAUDE_KEY && !DEFAULT_GEMINI_KEY) setShowWelcomeSetup(true);
+      } catch (e) {
+        const id = uid();
+        setChats([{ id, title: "New chat", pinned: false, messages: [], createdAt: now() }]);
+        setCurrentChatId(id);
+      }
+      setBooted(true);
+    })();
+  }, []);
+
+  // ---- persist on change ----
+  useEffect(() => { if (booted) window.storage.set("nexa:chats", JSON.stringify(chats)).catch(() => {}); }, [chats, booted]);
+  useEffect(() => { if (booted) window.storage.set("nexa:memory", JSON.stringify(memory)).catch(() => {}); }, [memory, booted]);
+  useEffect(() => {
+    if (booted) window.storage.set("nexa:settings", JSON.stringify({ ...settings, memoryEnabled })).catch(() => {});
+  }, [settings, memoryEnabled, booted]);
+  useEffect(() => {
+    if (booted && dockPos) window.storage.set("nexa:dockpos", JSON.stringify(dockPos)).catch(() => {});
+  }, [dockPos, booted]);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [currentChat?.messages?.length, currentChat?.messages?.[currentChat?.messages?.length - 1]?.content]);
+
+  useEffect(() => {
+    const loadVoices = () => setVoices(window.speechSynthesis ? window.speechSynthesis.getVoices() : []);
+    loadVoices();
+    if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = loadVoices;
+  }, []);
+
+  function updateChat(id, updater) {
+    setChats((prev) => prev.map((ch) => (ch.id === id ? updater(ch) : ch)));
+  }
+
+  function newChat() {
+    const id = uid();
+    setChats((prev) => [{ id, title: "New chat", pinned: false, messages: [], createdAt: now() }, ...prev]);
+    setCurrentChatId(id);
+    setMobileSidebarOpen(false);
+    setInput("");
+  }
+
+  function deleteChat(id) {
+    setChats((prev) => {
+      const next = prev.filter((ch) => ch.id !== id);
+      if (id === currentChatId) setCurrentChatId(next[0]?.id || null);
+      return next.length ? next : [{ id: uid(), title: "New chat", pinned: false, messages: [], createdAt: now() }];
+    });
+  }
+
+  function renameChat(id, title) {
+    updateChat(id, (ch) => ({ ...ch, title: title || "Untitled" }));
+  }
+
+  function togglePin(id) {
+    updateChat(id, (ch) => ({ ...ch, pinned: !ch.pinned }));
+  }
+
+  function clearConversation(id) {
+    updateChat(id, (ch) => ({ ...ch, messages: [] }));
+  }
+
+  function exportChat(ch) {
+    const md = ch.messages.map((m) => `### ${m.role === "user" ? "You" : "Nexa"}\n\n${m.content}\n`).join("\n---\n\n");
+    const blob = new Blob([`# ${ch.title}\n\n${md}`], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `${ch.title.replace(/\s+/g, "-").toLowerCase()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function shareChat(ch) {
+    const md = ch.messages.map((m) => `${m.role === "user" ? "You" : "Nexa"}: ${m.content}`).join("\n\n");
+    try {
+      if (navigator.share) await navigator.share({ title: ch.title, text: md });
+      else { await navigator.clipboard.writeText(md); setErrorBanner("__ok__Conversation copied to clipboard."); }
+    } catch (e) {}
+  }
+
+  function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
+
+  function humanizeError(err, status) {
+    if (status === 401 || status === 403) return "That API key was rejected. Double-check it in Settings → AI Provider.";
+    if (status === 429) return "Rate limit reached. Wait a moment and try again.";
+    if (status === 400) return "That request wasn't accepted by the model — it may be too long, malformed, or the API key is invalid.";
+    if (status >= 500) return "The AI service is having trouble on its end. Please try again.";
+    if (err && err.name === "AbortError") return "__stopped__";
+    if (err && /network|fetch/i.test(err.message || "")) return "Network error — check your connection and try again.";
+    return "Something went wrong while generating the response. Please try again.";
+  }
+
+  // ---- core generation ----
+  const generate = useCallback(async (chatId, messagesForApi, assistantMsgId) => {
+    setIsGenerating(true);
+    setErrorBanner("");
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    let system = "You are Nexa, a helpful, precise AI assistant embedded in the Nexa AI platform. Format code in fenced code blocks with a language tag.";
+    if (settings.style === "concise") system += " Keep answers brief and to the point.";
+    if (settings.style === "detailed") system += " Give thorough, well-structured answers.";
+    if (memoryEnabled && memory.length) {
+      system += "\n\nRemembered context the user has approved you to use:\n" + memory.map((m) => `- ${m.text}`).join("\n");
+    }
+    const lastUser = [...messagesForApi].reverse().find((m) => m.role === "user");
+    if (files.length && lastUser) {
+      const top = topChunksForQuery(files, lastUser.content, 4);
+      if (top.length) {
+        system += "\n\nRelevant excerpts from files the user uploaded (cite the file name when you use one):\n" +
+          top.map((t) => `[${t.file}]: ${t.text}`).join("\n---\n");
+      }
+    }
+
+    if (!(settings.useGemini && settings.geminiKey) && !settings.claudeKey) {
+      setIsGenerating(false);
+      abortRef.current = null;
+      updateChat(chatId, (ch) => ({
+        ...ch,
+        messages: ch.messages.map((m) => (m.id === assistantMsgId ? {
+          ...m, pending: false,
+          content: "No AI provider is set up yet. This standalone build can't use Anthropic's server-side key the way the in-Claude version does — add your own Claude or Gemini API key in Settings → AI Provider to start chatting. (Image generation and voice work already, with no key needed.)",
+        } : m)),
+      }));
+      return;
+    }
+
+    try {
+      const useGemini = settings.useGemini && settings.geminiKey;
+      let acc = "";
+
+      if (useGemini) {
+        const model = "gemini-2.0-flash";
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(settings.geminiKey)}`;
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: system }] },
+            generationConfig: { temperature: settings.temperature, maxOutputTokens: 1500 },
+            contents: messagesForApi.map((m) => ({
+              role: m.role === "assistant" ? "model" : "user",
+              parts: [{ text: m.content }],
+            })),
+          }),
+        });
+        if (!resp.ok || !resp.body) throw Object.assign(new Error("Request failed"), { status: resp.status });
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
+            try {
+              const evt = JSON.parse(payload);
+              const piece = evt?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+              if (piece) {
+                acc += piece;
+                updateChat(chatId, (ch) => ({
+                  ...ch,
+                  messages: ch.messages.map((m) => (m.id === assistantMsgId ? { ...m, content: acc } : m)),
+                }));
+              }
+            } catch (e) { /* ignore partial json */ }
+          }
+        }
+      } else {
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": settings.claudeKey,
+            "anthropic-version": "2023-06-01",
+            "anthropic-dangerous-direct-browser-access": "true",
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: "claude-sonnet-4-6",
+            max_tokens: 1500,
+            temperature: settings.temperature,
+            system,
+            stream: true,
+            messages: messagesForApi.map((m) => ({ role: m.role, content: m.content })),
+          }),
+        });
+
+        if (!resp.ok || !resp.body) {
+        const hasSavedKey = setR.status === "fulfilled" && setR.value && (() => {throw Object.assign(new Error("Request failed"), { status: resp.status });
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              const evt = JSON.parse(payload);
+              if (evt.type === "content_block_delta" && evt.delta && evt.delta.text) {
+                acc += evt.delta.text;
+                updateChat(chatId, (ch) => ({
+                  ...ch,
+                  messages: ch.messages.map((m) => (m.id === assistantMsgId ? { ...m, content: acc } : m)),
+                }));
+              }
+            } catch (e) { /* ignore partial json */ }
+          }
+        }
+      }
+
+      updateChat(chatId, (ch) => ({
+        ...ch,
+        messages: ch.messages.map((m) => (m.id === assistantMsgId ? { ...m, content: acc || "(No response was generated.)", pending: false } : m)),
+      }));
+    } catch (err) {
+      const msg = humanizeError(err, err.status);
+      if (msg === "__stopped__") {
+        updateChat(chatId, (ch) => ({
+          ...ch,
+          messages: ch.messages.map((m) => (m.id === assistantMsgId ? { ...m, pending: false, stopped: true } : m)),
+        }));
+      } else {
+        updateChat(chatId, (ch) => ({
+          ...ch,
+          messages: ch.messages.map((m) => (m.id === assistantMsgId ? { ...m, pending: false, error: msg } : m)),
+        }));
+      }
+    } finally {
+      setIsGenerating(false);
+      abortRef.current = null;
+    }
+  }, [settings, memory, memoryEnabled, files]);
+
+  function detectsImageIntent(text) {
+    const NOUNS = "image|picture|pic|photo|photograph|artwork|illustration|drawing|painting|wallpaper|portrait|poster|logo|tasveer";
+    const ACTIONS = "generate|create|make|draw|design|sketch|paint|render";
+    const pattern = new RegExp(
+      `\\b(${ACTIONS})\\b[^.?!]{0,30}\\b(${NOUNS})\\b` +
+      `|\\b(${NOUNS})\\s+of\\b` +
+      `|\\b(${NOUNS})\\s+(banao?|banane?)\\b|\\bimage\\s+wala\\b`,
+      "i"
+    );
+    return pattern.test(text);
+  }
+
+  function extractImagePrompt(text) {
+    let p = text;
+    const strip = [
+      /\b(can|could|will)\s+you\s+/gi, /\bplease\b/gi, /\bkindly\b/gi,
+      /\b(generate|create|make|draw|design|sketch|paint|render)\s+(me\s+)?(an?|the)?\s*(image|picture|pic|photo|photograph|artwork|illustration|drawing|painting|wallpaper|portrait|poster|logo)\s*(of)?\b/gi,
+      /\b(image|picture|pic|photo|photograph|portrait|wallpaper|poster|tasveer)\s+(banao?|banane?)(\s+wala)?\s*(karo)?\b/gi,
+      /\bis\s*ko\b/gi, /\bkaro\b/gi,
+    ];
+    for (const re of strip) p = p.replace(re, " ");
+    p = p.replace(/\s+/g, " ").trim();
+    return p || text;
+  }
+
+  function sendMessage(overrideText) {
+    const text = (overrideText !== undefined ? overrideText : input).trim();
+    if (!text || isGenerating || !currentChat) return;
+    setInput("");
+    setEditingId(null);
+    const userMsg = { id: uid(), role: "user", content: text, ts: now() };
+    const isFirst = currentChat.messages.length === 0;
+
+    if (detectsImageIntent(text)) {
+      if (!settings.capImageGen) {
+        const notice = { id: uid(), role: "assistant", ts: now(),
+          content: "Image generation is turned off in Settings → Capabilities. Turn it back on to generate images." };
+        updateChat(currentChat.id, (ch) => ({ ...ch, title: isFirst ? text.slice(0, 40) : ch.title, messages: [...ch.messages, userMsg, notice] }));
+        return;
+      }
+      const prompt = extractImagePrompt(text);
+      const imgMsg = { id: uid(), role: "assistant", type: "image", prompt, seed: Math.floor(Math.random() * 1e9), ts: now() };
+      updateChat(currentChat.id, (ch) => ({
+        ...ch,
+        title: isFirst ? text.slice(0, 40) : ch.title,
+        messages: [...ch.messages, userMsg, imgMsg],
+      }));
+      return;
+    }
+
+    const assistantMsg = { id: uid(), role: "assistant", content: "", ts: now(), pending: true };
+    updateChat(currentChat.id, (ch) => ({
+      ...ch,
+      title: isFirst ? text.slice(0, 40) : ch.title,
+      messages: [...ch.messages, userMsg, assistantMsg],
+    }));
+
+    const apiHistory = [...currentChat.messages, userMsg];
+    generate(currentChat.id, apiHistory, assistantMsg.id);
+  }
+
+  function regenerateImage(chatId, msgId) {
+    updateChat(chatId, (ch) => ({
+      ...ch,
+      messages: ch.messages.map((m) => (m.id === msgId ? { ...m, seed: Math.floor(Math.random() * 1e9), failed: false } : m)),
+    }));
+  }
+
+  function stopGeneration() {
+    if (abortRef.current) abortRef.current.abort();
+  }
+
+  function regenerate(chatId) {
+    const ch = chats.find((c2) => c2.id === chatId);
+    if (!ch || isGenerating) return;
+    const msgs = ch.messages;
+    const lastAssistantIdx = [...msgs].reverse().findIndex((m) => m.role === "assistant");
+    if (lastAssistantIdx === -1) return;
+    const idx = msgs.length - 1 - lastAssistantIdx;
+    const assistantMsgId = uid();
+    const history = msgs.slice(0, idx);
+    updateChat(chatId, (c2) => ({
+      ...c2,
+      messages: [...history, { id: assistantMsgId, role: "assistant", content: "", ts: now(), pending: true }],
+    }));
+    generate(chatId, history, assistantMsgId);
+  }
+
+  function retryMessage(chatId, msgId) {
+    const ch = chats.find((c2) => c2.id === chatId);
+    const idx = ch.messages.findIndex((m) => m.id === msgId);
+    const history = ch.messages.slice(0, idx);
+    updateChat(chatId, (c2) => ({
+      ...c2,
+      messages: [...history, { id: msgId, role: "assistant", content: "", ts: now(), pending: true }],
+    }));
+    generate(chatId, history, msgId);
+  }
+
+  function startEdit(msg) {
+    setEditingId(msg.id);
+    setInput(msg.content);
+    textareaRef.current?.focus();
+  }
+
+  function submitEdit() {
+    if (!currentChat) return;
+    const idx = currentChat.messages.findIndex((m) => m.id === editingId);
+    if (idx === -1) return sendMessage();
+    const text = input.trim();
+    if (!text) return;
+    const history = currentChat.messages.slice(0, idx);
+    const userMsg = { id: uid(), role: "user", content: text, ts: now() };
+    const assistantMsg = { id: uid(), role: "assistant", content: "", ts: now(), pending: true };
+    updateChat(currentChat.id, (ch) => ({ ...ch, messages: [...history, userMsg, assistantMsg] }));
+    setEditingId(null);
+    setInput("");
+    generate(currentChat.id, [...history, userMsg], assistantMsg.id);
+  }
+
+  function deleteMessage(chatId, msgId) {
+    updateChat(chatId, (ch) => ({ ...ch, messages: ch.messages.filter((m) => m.id !== msgId) }));
+  }
+
+  function saveToMemory(text) {
+    setMemory((prev) => [...prev, { id: uid(), text: text.slice(0, 300), ts: now() }]);
+  }
+
+  async function resetAllData() {
+    try {
+      await Promise.allSettled([
+        window.storage.delete("nexa:chats"), window.storage.delete("nexa:memory"),
+        window.storage.delete("nexa:settings"), window.storage.delete("nexa:theme"),
+        window.storage.delete("nexa:dockpos"),
+      ]);
+    } catch (e) {}
+    const id = uid();
+    setChats([{ id, title: "New chat", pinned: false, messages: [], createdAt: now() }]);
+    setCurrentChatId(id);
+    setMemory([]);
+    setFiles([]);
+    setDockPos(null);
+    setSettings({ temperature: 0.7, style: "balanced", autoplay: false, rate: 1, voiceURI: "", openaiKey: "",
+      fontStyle: "default", profileName: "", capImageGen: true, capVoiceIn: true, capVoiceOut: true, notifyOnReply: false,
+      geminiKey: "", useGemini: false, sttLang: "en-US", claudeKey: "", layoutStyle: "minimal" });
+    setShowSettings(false);setErrorBanner("__ok__All local data has been cleared.");
+  }
+
+  // ---- voice: speech-to-text ----
+  async function toggleListening() {
+    if (!settings.capVoiceIn) { setErrorBanner("Voice input is turned off in Settings → Capabilities."); return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setErrorBanner("Speech recognition isn't supported in this browser. Use Chrome or Edge."); return; }
+    if (listening) { recognitionRef.current?.stop(); setListening(false); return; }
+    if (!window.isSecureContext) {
+      setErrorBanner("Voice input needs a secure page (opened over https, or from localhost). Opening the file directly can block mic access in some browsers.");
+      return;
+    }
+    // Ask for mic permission explicitly first — SpeechRecognition's own prompt is unreliable
+    // when a file is opened directly (as opposed to a hosted page), so we trigger it ourselves.
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    } catch (err) {
+      setErrorBanner("Microphone access was blocked. Check the padlock/site-settings icon in the address bar and allow the microphone for this page.");
+      return;
+    }
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = settings.sttLang || "en-US";
+    rec.onresult = (e) => {
+      let transcript = "";
+      for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript;
+      setInput(transcript);
+    };
+    rec.onerror = (e) => {
+      setListening(false);
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") setErrorBanner("Microphone permission was denied. Allow it for this page in your browser settings and try again.");
+      else if (e.error === "no-speech") setErrorBanner("Didn't catch that — no speech detected. Try again.");
+      else setErrorBanner("Voice input stopped due to an error (" + e.error + "). Try again.");
+    };
+    rec.onend = () => setListening(false);
+    recognitionRef.current = rec;
+    try {
+      rec.start();
+      setListening(true);
+    } catch (err) {
+      setErrorBanner("Couldn't start voice input. Try tapping the mic again.");
+      setListening(false);
+    }
+  }
+
+  // ---- voice: text-to-speech ----
+  function speak(msg) {
+    if (!settings.capVoiceOut) { setErrorBanner("Voice output is turned off in Settings → Capabilities."); return; }
+    if (!window.speechSynthesis) { setErrorBanner("Speech playback isn't supported in this browser. Use Chrome or Edge."); return; }
+    if (speakingId === msg.id) {
+      window.speechSynthesis.cancel();
+      if (window._nexaSpeakKeepAlive) { clearInterval(window._nexaSpeakKeepAlive); window._nexaSpeakKeepAlive = null; }
+      setSpeakingId(null);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    if (window._nexaSpeakKeepAlive) { clearInterval(window._nexaSpeakKeepAlive); window._nexaSpeakKeepAlive = null; }
+    const u = new SpeechSynthesisUtterance(msg.content);
+    u.rate = settings.rate;
+    const v = voices.find((v2) => v2.voiceURI === settings.voiceURI);
+    if (v) u.voice = v;
+    u.onend = () => {
+      if (window._nexaSpeakKeepAlive) { clearInterval(window._nexaSpeakKeepAlive); window._nexaSpeakKeepAlive = null; }
+      setSpeakingId(null);
+    };
+    u.onerror = () => {
+      if (window._nexaSpeakKeepAlive) { clearInterval(window._nexaSpeakKeepAlive); window._nexaSpeakKeepAlive = null; }
+      setSpeakingId(null);
+    };
+    try {
+      window.speechSynthesis.speak(u);
+    } catch (err) {
+      setErrorBanner("Couldn't play voice. Try again.");
+      return;
+    }
+    // Chrome silently pauses long speech after ~15s unless nudged — this keeps it alive.
+    window._nexaSpeakKeepAlive = setInterval(() => {
+      if (!window.speechSynthesis.speaking) { clearInterval(window._nexaSpeakKeepAlive); window._nexaSpeakKeepAlive = null; return; }
+      window.speechSynthesis.pause();
+      window.speechSynthesis.resume();
+    }, 5000);
+    setSpeakingId(msg.id);
+  }
+
+  useEffect(() => {
+    if (!settings.autoplay) return;
+    const last = currentChat?.messages?.[currentChat.messages.length - 1];
+    if (last && last.role === "assistant" && last.type !== "image" && !last.pending && last.content && !last.error) speak(last);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChat?.messages?.filter((m) => !m.pending).length]);
+
+  useEffect(() => {
+    if (!settings.notifyOnReply || !document.hidden) return;
+    const last = currentChat?.messages?.[currentChat.messages.length - 1];
+    if (last && last.role === "assistant" && !last.pending && (last.content || last.type === "image") &&
+        typeof Notification !== "undefined" && Notification.permission === "granted") {
+      new Notification("Nexa AI", { body: last.type === "image" ? "Your image is ready." : last.content.slice(0, 100) });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChat?.messages?.filter((m) => !m.pending).length]);
+
+  async function enableNotifications() {
+    if (typeof Notification === "undefined") { setErrorBanner("Notifications aren't supported in this browser."); return false; }
+    if (Notification.permission === "granted") return true;
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") { setErrorBanner("Notification permission was denied in your browser settings."); return false; }
+    return true;
+  }
+
+  async function handleFileUpload(e) {
+    const list = Array.from(e.target.files || []);
+    for (const file of list) {
+      const isText = /\.(txt|md|csv|json)$/i.test(file.name) || file.type.startsWith("text/");
+      if (!isText) {
+        setErrorBanner(`"${file.name}" isn't a supported format here — only .txt, .md, .csv and .json can be read in-browser. PDF/DOCX need a server-side extractor that isn't available in this sandbox.`);
+        continue;
+      }
+      if (file.size > 2_000_000) {
+        setErrorBanner(`"${file.name}" is too large (max 2MB in this demo).`);
+        continue;
+      }
+      try {
+        const text = await fileToText(file);
+        setFiles((prev) => [...prev, { id: uid(), name: file.name, chunks: chunkText(text) }]);
+      } catch (err) {
+        setErrorBanner(`Couldn't read "${file.name}".`);
+      }
+    }
+    e.target.value = "";
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (editingId) submitEdit(); else sendMessage();
+    }
+  }
+
+  const fontStacks = {
+    default: "'Inter', -apple-system, sans-serif",
+    serif: "'Fraunces', Georgia, serif",
+    mono: "'JetBrains Mono', monospace",
+  };
+
+  if (!booted) {
+    return (
+      <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: COLORS.bgDark, color: COLORS.violet, fontFamily: "sans-serif" }}>
+        Loading Nexa AI…
+      </div>
+    );
+  }
+
+  const filteredChats = [...chats]
+    .filter((ch) => ch.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => (b.pinned - a.pinned) || (b.createdAt - a.createdAt));
+
+  return (
+    <div style={{
+      height: "100vh", width: "100%", display: "flex", background: c.bg, color: c.text,
+      fontFamily: fontStacks[settings.fontStyle] || fontStacks.default, overflow: "hidden", position: "relative"
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-thumb { background: rgba(139,92,246,0.4); border-radius: 8px; }
+        button { font-family: inherit; }
+        textarea { font-family: inherit; }
+        @keyframes pulse-dot { 0%,100% { opacity: 0.25; } 50% { opacity: 1; } }
+        @keyframes twinkle { 0%,100% { opacity: 0.15; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.3); } }
+        @keyframes glowPulse { 0%,100% { box-shadow: 0 0 0 1px rgba(139,92,246,0.1), 0 6px 24px -8px rgba(139,92,246,0.4); } 50% { box-shadow: 0 0 0 1px rgba(139,92,246,0.22), 0 8px 34px -6px rgba(139,92,246,0.65); } }
+        .glow-composer { animation: glowPulse 3.2s ease-in-out infinite; transition: border-color 0.2s; }
+        .glow-composer:focus-within { border-color: rgba(139,92,246,0.8) !important; }
+        .pulse span { animation: pulse-dot 1.1s infinite; }
+        .pulse span:nth-child(2) { animation-delay: 0.15s; }
+        .pulse span:nth-child(3) { animation-delay: 0.3s; }
+        @media (max-width: 768px) {
+          .desktop-sidebar { display: none !important; }
+        }
+      `}</style>
+
+      {/* ---------- Sidebar ---------- */}
+      {(sidebarOpen || mobileSidebarOpen) && (
+        <div
+          className={mobileSidebarOpen ? "" : "desktop-sidebar"}
+          style={{
+            width: 280, background: c.bg2, borderRight: `1px solid ${c.border}`,
+            display: "flex", flexDirection: "column", flexShrink: 0,
+            position: mobileSidebarOpen ? "fixed" : "relative", zIndex: 40, height: "100%"
+          }}
+        >
+          <div style={{ padding: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20, letterSpacing: -0.5, color: c.text }}>
+              Nexa <span style={{ color: COLORS.violet }}>AI</span>
+            </div><button aria-label="Close sidebar" onClick={() => { setSidebarOpen(false); setMobileSidebarOpen(false); }}
+              style={{ background: "none", border: "none", color: c.textDim, cursor: "pointer", display: "flex" }}>
+              <X size={18} />
+            </button>
+          </div>
+
+          <div style={{ padding: "0 12px 12px" }}>
+            <button onClick={newChat} style={{
+              width: "100%", display: "flex", alignItems: "center", gap: 8, justifyContent: "center",
+              background: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})`, color: "#fff", border: "none", borderRadius: 12,
+              padding: "10px 12px", fontWeight: 600, cursor: "pointer", fontSize: 14, boxShadow: `0 4px 18px -4px ${COLORS.violetSoft}`
+            }}>
+              <Plus size={16} /> New chat
+            </button>
+          </div>
+
+          <div style={{ padding: "0 12px 8px" }}>
+            <div style={{ position: "relative" }}>
+              <Search size={14} style={{ position: "absolute", left: 10, top: 10, color: c.textDim }} />
+              <input
+                value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search chats"
+                aria-label="Search chat history"
+                style={{
+                  width: "100%", background: c.bg3, border: `1px solid ${c.border}`, borderRadius: 8,
+                  padding: "8px 8px 8px 30px", color: c.text, fontSize: 13, outline: "none"
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: "4px 8px" }}>
+            {filteredChats.map((ch) => (
+              <ChatListItem key={ch.id} chat={ch} active={ch.id === currentChatId} colors={c}
+                onSelect={() => { setCurrentChatId(ch.id); setMobileSidebarOpen(false); }}
+                onRename={(t) => renameChat(ch.id, t)}
+                onDelete={() => deleteChat(ch.id)}
+                onPin={() => togglePin(ch.id)} />
+            ))}
+            {filteredChats.length === 0 && (
+              <div style={{ color: c.textDim, fontSize: 13, padding: 12, textAlign: "center" }}>No chats found.</div>
+            )}
+          </div>
+
+          <div style={{ padding: 12, borderTop: `1px solid ${c.border}`, display: "flex", gap: 6 }}>
+            <SideIconButton icon={<Brain size={16} />} label="Memory" onClick={() => setShowMemory(true)} colors={c} />
+            <SideIconButton icon={<Settings size={16} />} label="Settings" onClick={() => setShowSettings(true)} colors={c} />
+          </div>
+        </div>
+      )}
+      {mobileSidebarOpen && (
+        <div onClick={() => setMobileSidebarOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 30 }} />
+      )}
+
+      {/* ---------- Main ---------- */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px",
+          flexShrink: 0,
+          background: dark ? "rgba(18,18,31,0.55)" : "rgba(255,255,255,0.55)",
+          backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button aria-label="Toggle sidebar" onClick={() => {
+              if (window.innerWidth <= 768) setMobileSidebarOpen((v) => !v); else setSidebarOpen((v) => !v);
+            }} style={{
+              background: dark ? "rgba(139,92,246,0.12)" : "rgba(139,92,246,0.1)", border: `1px solid ${COLORS.violetSoft}`,
+              borderRadius: 10, width: 34, height: 34, color: c.text, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center"
+            }}>
+              <Menu size={17} />
+            </button>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>Nexa AI</div>
+            {isGenerating && (
+              <span className="pulse" style={{ display: "inline-flex", gap: 3, marginLeft: 4 }}>
+                <span style={{ width: 4, height: 4, borderRadius: 4, background: COLORS.violet2, display: "inline-block" }} />
+                <span style={{ width: 4, height: 4, borderRadius: 4, background: COLORS.violet2, display: "inline-block" }} />
+                <span style={{ width: 4, height: 4, borderRadius: 4, background: COLORS.violet2, display: "inline-block" }} />
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {settings.layoutStyle === "classic" && (
+              <>
+                <button
+                  onClick={() => setShowPlusInfo(true)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5, background: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})`,
+                    border: "none", borderRadius: 20, padding: "6px 12px", color: "#fff", fontSize: 12.5, fontWeight: 600, cursor: "pointer"
+                  }}>
+                  <Sparkles size={13} /> Get Plus
+                </button>
+                <button
+                  onClick={() => { setShowSettings(true); setSettingsPage("profile"); }}
+                  style={{
+                    background: "transparent", border: `1px solid ${COLORS.violetSoft}`, borderRadius: 20,
+                    padding: "6px 14px", color: c.text, fontSize: 12.5, fontWeight: 600, cursor: "pointer"
+                  }}>
+                  {settings.profileName ? settings.profileName : "Log in"}
+                </button>
+              </>
+            )}
+            <button aria-label="Export chat" title="Export as Markdown" onClick={() => currentChat && exportChat(currentChat)}
+              style={{
+                background: dark ? "rgba(139,92,246,0.12)" : "rgba(139,92,246,0.1)", border: `1px solid ${COLORS.violetSoft}`,
+                borderRadius: 10, width: 34, height: 34, color: c.text, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center"
+              }}><Download size={16} /></button>
+            <ThemeToggle theme={theme} setTheme={setTheme} colors={c} />
+          </div>
+        </div>
+
+        {showWelcomeSetup && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div style={{
+              background: c.bg2, border: `1px solid ${COLORS.violetSoft}`, borderRadius: 18, padding: 22, maxWidth: 340,
+              boxShadow: `0 20px 60px -10px ${COLORS.violetSoft}`
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <Sparkles size={20} color={COLORS.violet} />
+                <div style={{ fontWeight: 700, fontSize: 17, fontFamily: "'Fraunces', serif" }}>Welcome to Nexa AI</div>
+              </div>
+              <div style={{ fontSize: 13.5, color: c.text, lineHeight: 1.7 }}>
+                Image generation and voice already work — no setup needed. To unlock <strong>chat</strong>, add one free API key:
+              </div>
+              <ol style={{ fontSize: 13, color: c.textDim, lineHeight: 1.9, paddingLeft: 20, margin: "10px 0" }}>
+                <li>Go to <strong style={{ color: c.text }}>aistudio.google.com/apikey</strong> and sign in with any Google account</li>
+                <li>Tap "Create API key" — it's free, no card required for the free tier</li>
+                <li>Copy it and paste it below</li>
+              </ol>
+              <input
+                type="password" placeholder="Paste your Gemini key here (AIza…)"
+                onChange={(e) => setSettings((s) => ({ ...s, geminiKey: e.target.value, useGemini: true }))}
+                style={{ width: "100%", background: c.bg3, border: `1px solid ${c.border}`, borderRadius: 8, padding: 10, color: c.text, fontSize: 13, marginBottom: 12 }}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setShowWelcomeSetup(false)} style={{
+                  flex: 1, background: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})`, border: "none",
+                  borderRadius: 10, padding: "10px 0", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: 13.5
+                }}>Start chatting</button>
+                <button onClick={() => setShowWelcomeSetup(false)} style={{
+                  background: "none", border: `1px solid ${c.border}`, borderRadius: 10, padding: "10px 14px",
+                  color: c.textDim, cursor: "pointer", fontSize: 13.5
+                }}>Skip for now</button>
+              </div>
+              <div style={{ fontSize: 10.5, color: c.textDim, marginTop: 10, textAlign: "center" }}>
+                Your key stays in this browser only — it's never sent anywhere except directly to Google.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showPlusInfo && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+            onClick={() => setShowPlusInfo(false)}>
+            <div onClick={(e) => e.stopPropagation()} style={{
+              background: c.bg2, border: `1px solid ${COLORS.violetSoft}`, borderRadius: 16, padding: 20, maxWidth: 320
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <Sparkles size={18} color={COLORS.violet} />
+                <div style={{ fontWeight: 700, fontSize: 15 }}>No paid tier here</div>
+              </div>
+              <div style={{ fontSize: 13.5, color: c.textDim, lineHeight: 1.6 }}>
+                This build has no billing system and nothing to unlock — every feature (chat, voice, images, files, memory) is already
+                available for free. A real "Plus" tier would need a backend, payments, and usage limits, which don't exist in this
+                in-browser demo. I'm not going to fake a purchase flow.
+              </div>
+              <button onClick={() => setShowPlusInfo(false)} style={{
+                marginTop: 14, width: "100%", background: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})`,
+                border: "none", borderRadius: 10, padding: "9px 0", color: "#fff", fontWeight: 600, cursor: "pointer"
+              }}>Got it</button>
+            </div>
+          </div>
+        )}
+
+        {errorBanner && (
+          <div style={{
+            margin: "10px 16px 0", padding: "8px 12px", borderRadius: 8, fontSize: 13,
+            background: errorBanner.startsWith("__ok__") ? "rgba(95,180,162,0.15)" : "rgba(208,104,90,0.15)",
+            color: errorBanner.startsWith("__ok__") ? COLORS.teal : COLORS.danger,
+            display: "flex", justifyContent: "space-between", alignItems: "center"
+          }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <AlertCircle size={14} /> {errorBanner.replace("__ok__", "")}
+            </span>
+            <button onClick={() => setErrorBanner("")} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}><X size={14} /></button>
+          </div>
+        )}
+
+        {files.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "8px 16px 0" }}>
+            {files.map((f) => (
+              <span key={f.id} style={{
+                display: "flex", alignItems: "center", gap: 6, background: c.bg3, borderRadius: 20,
+                padding: "4px 10px", fontSize: 12, color: c.textDim
+              }}>
+                <FileText size={12} /> {f.name}
+                <button onClick={() => setFiles((prev) => prev.filter((x) => x.id !== f.id))}
+                  style={{ background: "none", border: "none", color: c.textDim, cursor: "pointer", display: "flex" }}>
+                  <X size={11} />
+                </button>
+              </span>))}
+          </div>
+        )}
+
+        <div ref={scrollRef} onScroll={(e) => {
+          const el = e.currentTarget;
+          setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 200);
+        }} style={{ flex: 1, overflowY: "auto", padding: "16px 0", position: "relative" }}>
+          <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 16px" }}>
+            {(!currentChat || currentChat.messages.length === 0) && (
+              <div style={{ textAlign: "center", marginTop: "12vh", position: "relative" }}>
+                <div style={{ position: "absolute", top: -60, left: "-5%", width: "60%", height: 220, pointerEvents: "none", overflow: "hidden" }}>
+                  {stars.map((s, i) => (
+                    <span key={i} style={{
+                      position: "absolute", left: `${s.x}%`, top: `${s.y}%`, width: s.size, height: s.size,
+                      borderRadius: "50%", background: i % 2 ? COLORS.violet : COLORS.violet2,
+                      boxShadow: `0 0 ${s.size * 3}px ${i % 2 ? COLORS.violet : COLORS.violet2}`,
+                      animation: `twinkle ${s.dur}s ease-in-out ${s.delay}s infinite`
+                    }} />
+                  ))}
+                </div>
+                <div style={{
+                  width: 40, height: 40, margin: "0 auto 18px", display: "flex", alignItems: "center", justifyContent: "center",
+                  color: COLORS.violet, filter: `drop-shadow(0 0 14px ${COLORS.violet})`
+                }}>
+                  <Sparkles size={34} />
+                </div>
+                <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 32, marginBottom: 10, lineHeight: 1.15 }}>
+                  <span style={{ color: c.text }}>Welcome </span>
+                  <span style={{ color: COLORS.violet }}>to </span>
+                  <span style={{
+                    background: `linear-gradient(90deg, ${COLORS.violet}, ${COLORS.violet2})`,
+                    WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text"
+                  }}>Nexa AI</span>
+                </div>
+                <div style={{ fontSize: 14.5, color: c.textDim, maxWidth: 460, margin: "0 auto 26px", lineHeight: 1.6 }}>
+                  How can I help you today?
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
+                  {[
+                    ["Explain something", "Explain how "],
+                    ["Build a website", "Help me build a website that "],
+                    ["Review code", "Review this code and suggest improvements:\n\n"],
+                  ].map(([label, starter]) => (
+                    <button key={label} onClick={() => { setInput(starter); textareaRef.current?.focus(); }}
+                      style={{
+                        background: c.bg3, border: `1px solid ${c.border}`, color: c.text, borderRadius: 12,
+                        padding: "10px 18px", fontSize: 13.5, cursor: "pointer"
+                      }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {currentChat?.messages.map((msg) => (
+              <MessageBubble
+                key={msg.id} msg={msg} colors={c} dark={dark}
+                speakingId={speakingId}
+                onCopy={copyToClipboard}
+                onEdit={() => startEdit(msg)}
+                onDelete={() => deleteMessage(currentChat.id, msg.id)}
+                onRegenerate={() => regenerate(currentChat.id)}
+                onRegenerateImage={() => regenerateImage(currentChat.id, msg.id)}
+                onRetry={() => retryMessage(currentChat.id, msg.id)}
+                onSave={() => saveToMemory(msg.content)}
+                onSpeak={() => speak(msg)}
+                openaiKey={settings.openaiKey}
+                capVoiceOut={settings.capVoiceOut}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div style={{ borderTop: `1px solid ${c.border}`, padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, position: "relative" }}>
+          {showScrollBtn && (
+            <button
+              onClick={() => scrollRef.current && scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })}
+              aria-label="Scroll to latest message"
+              style={{
+                position: "absolute", right: "50%", transform: "translateX(50%)", top: -42,
+                width: 32, height: 32, borderRadius: "50%",
+                background: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})`,
+                border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: `0 4px 14px -2px ${COLORS.violetSoft}`
+              }}
+            ><ChevronDown size={16} /></button>
+          )}
+          <div style={{ maxWidth: 760, margin: "0 auto" }}>
+            {editingId && (
+              <div style={{ fontSize: 12, color: COLORS.violet2, marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
+                <span>Editing message — this will replace everything after it.</span>
+                <button onClick={() => { setEditingId(null); setInput(""); }} style={{ background: "none", border: "none", color: COLORS.violet2, cursor: "pointer" }}>Cancel</button>
+              </div>
+            )}
+            <div className="glow-composer" style={{
+              display: "flex", alignItems: "flex-end", gap: 8,
+              background: dark ? "rgba(27,27,46,0.55)" : "rgba(255,255,255,0.6)",
+              backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
+              border: `1px solid ${COLORS.violetSoft}`,
+              borderRadius: 22, padding: "9px 9px 9px 14px",
+              boxShadow: `0 0 0 1px rgba(139,92,246,0.1), 0 6px 24px -8px rgba(139,92,246,0.4)`
+            }}>
+              <label style={{ cursor: "pointer", color: c.textDim, display: "flex", paddingBottom: 6 }} title="Attach a text file">
+                <Paperclip size={19} />
+                <input ref={fileInputRef} type="file" multiple accept=".txt,.md,.csv,.json,text/plain" onChange={handleFileUpload} style={{ display: "none" }} />
+              </label>
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask Everything…"
+                aria-label="Message input"
+                rows={Math.min(6, Math.max(1, input.split("\n").length))}
+                style={{
+                  flex: 1, background: "transparent", border: "none", outline: "none", resize: "none",
+                  color: c.text, fontSize: 15, lineHeight: 1.5, padding: "6px 0", maxHeight: 160
+                }}
+              />
+              {settings.capVoiceIn && (
+                <button
+                  aria-label={listening ? "Stop voice input" : "Start voice input"}
+                  onClick={toggleListening}
+                  style={{
+                    background: listening ? COLORS.danger : "none", border: "none", cursor: "pointer",
+                    color: listening ? "#fff" : c.textDim, borderRadius: 10, padding: 8, display: "flex"
+                  }}
+                >
+                  {listening ? <MicOff size={18} /> : <Mic size={18} />}
+                </button>
+              )}
+              {isGenerating ? (
+                <button aria-label="Stop generating" onClick={stopGeneration}
+                  style={{ background: COLORS.danger, border: "none", borderRadius: 10, padding: 9, cursor: "pointer", color: "#fff", display: "flex" }}>
+                  <Square size={16} fill="#fff" />
+                </button>
+              ) : (
+                <button
+                  aria-label="Send message"
+                  onClick={() => (editingId ? submitEdit() : sendMessage())}
+                  disabled={!input.trim()}
+                  style={{
+                    background: input.trim() ? `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})` : c.border, border: "none", borderRadius: 10, padding: 9,
+                    cursor: input.trim() ? "pointer" : "default", color: input.trim() ? "#fff" : c.textDim, display: "flex"
+                  }}
+                >
+                  <Send size={16} />
+                </button>
+              )}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+              <span style={{ fontSize: 11, color: c.textDim }}>
+                Nexa can make mistakes — verify important information.
+              </span>
+              {input.length > 0 && (
+                <span style={{ fontSize: 10.5, color: input.length > 4000 ? COLORS.danger : c.textDim, flexShrink: 0, marginLeft: 8 }}>
+                  {input.length.toLocaleString()} chars
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <ActionDock
+        open={dockOpen} setOpen={setDockOpen} colors={c} dark={dark} listening={listening}
+        pos={dockPos} setPos={setDockPos} horizontal={false}
+        onCall={toggleListening}
+        onGenerate={() => { if (input.trim()) sendMessage(); else textareaRef.current?.focus(); }}
+        onLibrary={() => setShowLibrary(true)}
+        onUpload={() => fileInputRef.current?.click()}
+      />
+
+      {showLibrary && (
+        <ImageLibrary
+          colors={c} dark={dark} chats={chats}
+          onOpenChat={(chatId) => { setCurrentChatId(chatId); setShowLibrary(false); }}
+          onClose={() => setShowLibrary(false)}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsPanel colors={c} theme={theme} setTheme={setTheme} settings={settings} setSettings={setSettings}
+          memoryEnabled={memoryEnabled} setMemoryEnabled={setMemoryEnabled} voices={voices}
+          memory={memory} setMemory={setMemory}
+          page={settingsPage} setPage={setSettingsPage}
+          onExport={() => currentChat && exportChat(currentChat)}
+          onShare={() => currentChat && shareChat(currentChat)}
+          onEnableNotifications={enableNotifications}
+          onResetAll={resetAllData}
+          onClose={() => { setShowSettings(false); setSettingsPage("main"); }} />
+      )}
+      {showMemory && (
+        <MemoryPanel colors={c} memory={memory} setMemory={setMemory} memoryEnabled={memoryEnabled}
+          setMemoryEnabled={setMemoryEnabled} onClose={() => setShowMemory(false)} />
+      )}
+    </div>function ActionDock({ open, setOpen, colors, dark, onCall, onGenerate, onLibrary, onUpload, listening, pos, setPos, horizontal }) {
+  const containerRef = useRef(null);
+  const dragRef = useRef({ dragging: false, moved: false, startX: 0, startY: 0, origX: 0, origY: 0 });
+
+  function onPointerMove(e) {
+    const d = dragRef.current;
+    if (!d.dragging) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) d.moved = true;
+    if (d.moved && containerRef.current) {
+      const el = containerRef.current;
+      let nx = d.origX + dx;
+      let ny = d.origY + dy;
+      nx = Math.max(4, Math.min(window.innerWidth - el.offsetWidth - 4, nx));
+      ny = Math.max(4, Math.min(window.innerHeight - el.offsetHeight - 4, ny));
+      setPos({ x: nx, y: ny });
+    }
+  }
+  function onPointerUp() {
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+    setTimeout(() => { dragRef.current.dragging = false; }, 0);
+  }
+  function onHandlePointerDown(e) {
+    const rect = containerRef.current.getBoundingClientRect();
+    dragRef.current = { dragging: true, moved: false, startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }
+
+  const items = [
+    { key: "call", icon: <Phone size={19} fill={listening ? "#fff" : "none"} />, label: listening ? "Listening…" : "Call", onClick: onCall, active: listening },
+    { key: "generate", icon: <Sparkles size={19} />, label: "Generate", onClick: onGenerate },
+    { key: "library", icon: <ImageIcon size={19} />, label: "Library", onClick: onLibrary },
+    { key: "upload", icon: <UploadCloud size={19} />, label: "Upload", onClick: onUpload },
+  ];
+
+  const wrapStyle = pos
+    ? { position: "fixed", left: pos.x, top: pos.y, zIndex: 25, display: "flex", flexDirection: horizontal ? "column" : "row", alignItems: "center", touchAction: "none" }
+    : horizontal
+      ? { position: "fixed", left: "50%", bottom: 96, transform: "translateX(-50%)", zIndex: 25, display: "flex", flexDirection: "column", alignItems: "center", touchAction: "none" }
+      : { position: "fixed", right: 14, top: "50%", transform: "translateY(-50%)", zIndex: 25, display: "flex", alignItems: "center", touchAction: "none" };
+
+  const handleStyle = horizontal
+    ? { width: 40, height: 22, borderRadius: 12, marginBottom: -1 }
+    : { width: 22, height: 40, borderRadius: 12, marginRight: -1 };
+
+  return (
+    <div ref={containerRef} style={wrapStyle}>
+      <button
+        onPointerDown={onHandlePointerDown}
+        onClick={() => { if (!dragRef.current.moved) setOpen((v) => !v); }}
+        aria-label={open ? "Collapse quick actions (hold to move)" : "Expand quick actions (hold to move)"}
+        title="Tap to toggle · hold and drag to move"
+        style={{
+          ...handleStyle, border: `1px solid ${COLORS.violetSoft}`,
+          background: dark ? "rgba(18,18,31,0.85)" : "rgba(255,255,255,0.85)", color: colors.textDim,
+          display: "flex", alignItems: "center", justifyContent: "center", cursor: "grab", zIndex: 2, touchAction: "none"
+        }}
+      >
+        {horizontal ? (open ? <ChevronDown size={14} /> : <ChevronUpIcon size={14} />) : (open ? <ChevronRight size={14} /> : <ChevronLeft size={14} />)}
+      </button>
+      <div style={{
+        position: "relative", display: "flex", flexDirection: horizontal ? "row" : "column", gap: 14, alignItems: "center",
+        background: dark ? "rgba(18,18,31,0.78)" : "rgba(255,255,255,0.78)",
+        backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)",
+        border: `1px solid ${COLORS.violetSoft}`, borderRadius: 20,
+        padding: horizontal ? "12px 18px" : "18px 12px",
+        width: horizontal ? (open ? "auto" : 0) : (open ? 84 : 0),
+        height: horizontal ? (open ? 72 : 0) : "auto",
+        opacity: open ? 1 : 0, overflow: "visible",
+        transition: "width 0.32s cubic-bezier(.4,0,.2,1), height 0.32s cubic-bezier(.4,0,.2,1), opacity 0.25s ease",
+        boxShadow: `0 8px 34px -8px ${COLORS.violetSoft}`
+      }}>
+        {/* drag-handle style 3-dot indicator — pops in as particles, then gently twinkles */}
+        <span style={{
+          position: "absolute",
+          ...(horizontal
+            ? { top: -5, left: "50%", transform: `translateX(-50%) scale(${open ? 1 : 0.1})`, flexDirection: "row" }
+            : { left: -5, top: "50%", transform: `translateY(-50%) scale(${open ? 1 : 0.1})`, flexDirection: "column" }),
+          display: "flex", gap: 4, opacity: open ? 1 : 0,
+          transition: `all 0.4s cubic-bezier(.34,1.56,.64,1) ${open ? 0.4 : 0}s`
+        }}>
+          {[0, 1, 2].map((i) => (
+            <span key={i} style={{
+              width: 4.5, height: 4.5, borderRadius: "50%", background: COLORS.violet2,
+              boxShadow: `0 0 7px ${COLORS.violet2}`,
+              animation: open ? `twinkle ${1.4 + i * 0.3}s ease-in-out ${0.6 + i * 0.15}s infinite` : "none"
+            }} />
+          ))}
+        </span>
+
+        {items.map((item, i) => (
+          <button
+            key={item.key}
+            onClick={item.onClick}
+            title={item.label}
+            style={{
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 5, background: "none", border: "none",
+              cursor: "pointer", color: colors.text, width: horizontal ? 54 : "100%", flexShrink: 0,
+              opacity: open ? 1 : 0, transform: open ? "scale(1) translateY(0)" : "scale(0.4) translateY(8px)",
+              transition: `all 0.35s cubic-bezier(.34,1.56,.64,1) ${open ? i * 0.08 : 0}s`
+            }}
+          >
+            <span style={{
+              width: 42, height: 42, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+              background: item.active ? COLORS.danger : `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})`,
+              color: "#fff", boxShadow: `0 0 16px ${item.active ? COLORS.danger : COLORS.violet}99`
+            }}>
+              {item.icon}
+            </span>
+            <span style={{ fontSize: 10.5, color: colors.textDim }}>{item.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SideIconButton({ icon, label, onClick, colors }) {
+  return (
+    <button onClick={onClick} aria-label={label} style={{
+      flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+      background: colors.bg3, border: `1px solid ${colors.border}`, borderRadius: 8,
+      padding: "8px 6px", color: colors.text, cursor: "pointer", fontSize: 12
+    }}>
+      {icon} {label}
+    </button>
+  );
+}
+
+function ThemeToggle({ theme, setTheme, colors }) {
+  const icons = { dark: <Moon size={16} />, light: <Sun size={16} />, system: <Monitor size={16} /> };
+  const next = { dark: "light", light: "system", system: "dark" };
+  return (
+    <button
+      aria-label={`Theme: ${theme}. Click to change.`}
+      onClick={() => setTheme(next[theme])}
+      style={{
+        background: "rgba(139,92,246,0.12)", border: `1px solid ${COLORS.violetSoft}`, borderRadius: 10,
+        width: 34, height: 34, color: colors.text, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center"
+      }}
+    >
+      {icons[theme]}
+    </button>
+  );
+}
+
+function ChatListItem({ chat, active, colors, onSelect, onRename, onDelete, onPin }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(chat.title);
+  return (
+    <div
+      onClick={!editing ? onSelect : undefined}
+      style={{
+        display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderRadius: 8,
+        cursor: "pointer", background: active ? colors.bg3 : "transparent", marginBottom: 2, group: "true"
+      }}
+    >
+      {editing ? (
+        <input
+          autoFocus value={val} onChange={(e) => setVal(e.target.value)}
+          onBlur={() => { setEditing(false); onRename(val); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { setEditing(false); onRename(val); } }}
+          style={{ flex: 1, background: colors.bg2, border: `1px solid ${colors.border}`, borderRadius: 6, color: colors.text, fontSize: 13, padding: "3px 6px" }}
+        />
+      ) : (
+        <span style={{ flex: 1, fontSize: 13.5, color: colors.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {chat.pinned && <Pin size={10} style={{ marginRight: 4, display: "inline", color: COLORS.violet2 }} />}
+          {chat.title}
+        </span>
+      )}
+      {!editing && (
+        <div style={{ display: "flex", gap: 2 }} onClick={(e) => e.stopPropagation()}>
+          <IconBtn onClick={onPin} title={chat.pinned ? "Unpin" : "Pin"} colors={colors}>{chat.pinned ? <PinOff size={13} /> : <Pin size={13} />}</IconBtn>
+          <IconBtn onClick={() => setEditing(true)} title="Rename" colors={colors}><Pencil size={13} /></IconBtn>
+          <IconBtn onClick={onDelete} title="Delete" colors={colors} danger><Trash2 size={13} /></IconBtn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IconBtn({ children, onClick, title, colors, danger }) {
+  return (
+    <button onClick={onClick} title={title} aria-label={title} style={{
+      background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 5,
+      color: danger ? COLORS.danger : colors.textDim, display: "flex"
+    }}>
+      {children}
+    </button>
+  );
+}
+
+function ImageLibrary({ colors, dark, chats, onOpenChat, onClose }) {
+  const [viewing, setViewing] = useState(null);
+  const items = [];
+  for (const ch of chats) {
+  );
+  }for (const m of ch.messages) {
+      if (m.type === "image") items.push({ ...m, chatId: ch.id, chatTitle: ch.title });
+    }
+  }
+  items.sort((a, b) => b.ts - a.ts);
+
+  async function download(url, prompt) {
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl; a.download = `${prompt.slice(0, 30).replace(/\s+/g, "-")}.jpg`;
+      a.click();
+      URL.revokeObjectURL(objUrl);
+    } catch (e) {}
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 55, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: colors.bg2, borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 480, height: "82vh",
+        display: "flex", flexDirection: "column", border: `1px solid ${COLORS.violetSoft}`, borderBottom: "none"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 16, borderBottom: `1px solid ${COLORS.violetSoft}` }}>
+          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: "'Fraunces', serif" }}>Image library</div>
+          <button onClick={onClose} aria-label="Close library" style={{ background: "none", border: "none", color: colors.textDim, cursor: "pointer", display: "flex" }}><X size={19} /></button>
+        </div>
+
+        <div style={{ padding: 14, overflowY: "auto", flex: 1 }}>
+          {items.length === 0 ? (
+            <div style={{ textAlign: "center", color: colors.textDim, fontSize: 13.5, marginTop: 60 }}>
+              No images yet — just type something like "create an image of a cat" in the chat and it'll show up here.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {items.map((it) => {
+                const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(it.prompt)}?width=400&height=400&seed=${it.seed}&nologo=true`;
+                return (
+                  <button key={it.id} onClick={() => setViewing({ ...it, url })} style={{
+                    background: colors.bg3, border: `1px solid ${colors.border}`, borderRadius: 12, padding: 0,
+                    cursor: "pointer", overflow: "hidden", textAlign: "left"
+                  }}>
+                    <img src={url} alt={it.prompt} style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", display: "block" }} loading="lazy" />
+                    <div style={{ padding: "6px 8px", fontSize: 11, color: colors.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.prompt}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {viewing && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 65, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20 }}
+            onClick={() => setViewing(null)}>
+            <img src={viewing.url} alt={viewing.prompt} style={{ maxWidth: "100%", maxHeight: "60vh", borderRadius: 12 }} onClick={(e) => e.stopPropagation()} />
+            <div style={{ color: "#fff", fontSize: 13, marginTop: 12, textAlign: "center", maxWidth: 320 }}>{viewing.prompt}</div>
+            <div style={{ display: "flex", gap: 10, marginTop: 14 }} onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => download(viewing.url, viewing.prompt)} style={{
+                display: "flex", alignItems: "center", gap: 6, background: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})`,
+                border: "none", borderRadius: 10, padding: "8px 14px", color: "#fff", cursor: "pointer", fontSize: 13
+              }}><Download size={14} /> Download</button>
+              <button onClick={() => { onOpenChat(viewing.chatId); }} style={{
+                background: "none", border: `1px solid ${COLORS.violetSoft}`, borderRadius: 10, padding: "8px 14px", color: "#fff", cursor: "pointer", fontSize: 13
+              }}>Open chat</button>
+              <button onClick={() => setViewing(null)} style={{
+                background: "none", border: "none", color: colors.textDim, cursor: "pointer", fontSize: 13
+              }}>Close</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ImageMessage({ msg, colors, onRegenerate, onCopyPrompt, openaiKey }) {
+  const [status, setStatus] = useState("loading"); // loading | loaded | error
+  const [src, setSrc] = useState(null);
+  const [errMsg, setErrMsg] = useState("");
+  const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(msg.prompt)}?width=768&height=768&seed=${msg.seed}&nologo=true`;
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading"); setErrMsg("");
+    if (openaiKey) {
+      fetch("https://api.openai.com/v1/images/generations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
+        body: JSON.stringify({ model: "dall-e-3", prompt: msg.prompt, n: 1, size: "1024x1024" }),
+      })
+        .then(async (r) => {
+          if (!r.ok) {
+            const body = await r.json().catch(() => ({}));
+            throw new Error(body?.error?.message || `Request failed (${r.status})`);
+          }
+          return r.json();
+        })
+        .then((data) => {
+          if (cancelled) return;
+          const url = data?.data?.[0]?.url;
+          if (!url) throw new Error("No image returned");
+          setSrc(url);
+        })
+        .catch((e) => { if (!cancelled) { setErrMsg(e.message || "OpenAI request failed"); setStatus("error"); } });
+    } else {
+      setSrc(pollinationsUrl);
+    }
+    return () => { cancelled = true; };
+  }, [msg.prompt, msg.seed, openaiKey]);
+
+  async function download() {
+    try {
+      const resp = await fetch(src);
+      const blob = await resp.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl; a.download = `${msg.prompt.slice(0, 30).replace(/\s+/g, "-")}.jpg`;
+      a.click();
+      URL.revokeObjectURL(objUrl);
+    } catch (e) {}
+  }
+
+  return (
+    <div style={{ maxWidth: 320 }}>
+      <div style={{ fontSize: 12, color: colors.textDim, marginBottom: 6 }}>
+        {openaiKey ? "Generated via your OpenAI key (DALL·E 3)" : "Generated via Pollinations.ai (free third-party service)"} — prompt: "{msg.prompt}"
+      </div>
+      <div style={{
+        borderRadius: 14, overflow: "hidden", background: colors.bg3, minHeight: 200,
+        display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${colors.border}`
+      }}>
+        {status === "error" ? (
+          <div style={{ padding: 20, textAlign: "center", color: COLORS.danger, fontSize: 13 }}>
+            <AlertCircle size={18} style={{ marginBottom: 6 }} />
+            <div>{errMsg || "Couldn't reach the image service."}</div>
+          </div>
+        ) : (
+          <>
+            {status === "loading" && (
+              <span className="pulse" style={{ display: "inline-flex", gap: 4, padding: 30 }}>
+                <span style={{ width: 6, height: 6, borderRadius: 6, background: colors.textDim, display: "inline-block" }} />
+                <span style={{ width: 6, height: 6, borderRadius: 6, background: colors.textDim, display: "inline-block" }} />
+                <span style={{ width: 6, height: 6, borderRadius: 6, background: colors.textDim, display: "inline-block" }} />
+              </span>
+            )}
+            {src && (
+              <img
+                src={src} alt={msg.prompt}
+                style={{ width: "100%", display: status === "loaded" ? "block" : "none" }}
+                onLoad={() => setStatus("loaded")}
+                onError={() => { setErrMsg("Couldn't load the generated image."); setStatus("error"); }}
+              />
+            )}
+          </>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+        <TinyBtn onClick={onRegenerate} title="Regenerate" colors={colors}><RotateCcw size={13} /></TinyBtn>
+        <TinyBtn onClick={download} title="Download" colors={colors}><Download size={13} /></TinyBtn>
+        <TinyBtn onClick={() => onCopyPrompt(msg.prompt)} title="Copy prompt" colors={colors}><Copy size={13} /></TinyBtn>
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({ msg, colors, dark, onCopy, onEdit, onDelete, onRegenerate, onRetry, onSave, onSpeak, speakingId, onRegenerateImage, openaiKey, capVoiceOut }) {
+  const isUser = msg.role === "user";
+  if (msg.type === "image") {
+    return (
+      <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 18 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+          <ImageMessage msg={msg} colors={colors} onRegenerate={onRegenerateImage} onCopyPrompt={onCopy} openaiKey={openaiKey} />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 18 }}>
+      <div style={{ maxWidth: "88%", display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start" }}>
+        <div style={{
+          background: isUser ? `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})` : colors.bg3,
+          color: isUser ? "#fff" : colors.text,
+          borderRadius: isUser ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+          padding: "10px 14px", fontSize: 14.5,
+        }}>
+          {msg.pending && !msg.content ? (
+            <span className="pulse" style={{ display: "inline-flex", gap: 4 }}>
+              <span style={{ width: 5, height: 5, borderRadius: 5, background: colors.textDim, display: "inline-block" }} />
+              <span style={{ width: 5, height: 5, borderRadius: 5, background: colors.textDim, display: "inline-block" }} />
+              <span style={{ width: 5, height: 5, borderRadius: 5, background: colors.textDim, display: "inline-block" }} />
+            </span>
+          ) : (
+            renderContent(msg.content, onCopy)
+          )}
+          {msg.stopped && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>Generation stopped.</div>}
+          {msg.error && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, color: COLORS.danger }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 5 }}><AlertCircle size={13} /> {msg.error}</span>
+              <button onClick={onRetry} style={{alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 5, background: "none",
+                border: `1px solid ${COLORS.danger}`, color: COLORS.danger, borderRadius: 6, padding: "3px 8px", fontSize: 12, cursor: "pointer"
+              }}><RotateCcw size={12} /> Retry</button>
+            </div>
+          )}
+        </div>
+        {!msg.pending && (
+          <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+            <TinyBtn onClick={() => onCopy(msg.content)} title="Copy" colors={colors}><Copy size={13} /></TinyBtn>
+            {isUser && <TinyBtn onClick={onEdit} title="Edit" colors={colors}><Pencil size={13} /></TinyBtn>}
+            {!isUser && msg.content && !msg.error && <TinyBtn onClick={onRegenerate} title="Regenerate" colors={colors}><RotateCcw size={13} /></TinyBtn>}
+            {!isUser && msg.content && !msg.error && capVoiceOut && <TinyBtn onClick={onSpeak} title="Read aloud" colors={colors}>{speakingId === msg.id ? <VolumeX size={13} /> : <Volume2 size={13} />}</TinyBtn>}
+            {!isUser && msg.content && !msg.error && <TinyBtn onClick={onSave} title="Save to memory" colors={colors}><Brain size={13} /></TinyBtn>}
+            <TinyBtn onClick={onDelete} title="Delete" colors={colors} danger><Trash2 size={13} /></TinyBtn>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TinyBtn({ children, onClick, title, colors, danger }) {
+  return (
+    <button onClick={onClick} title={title} aria-label={title} style={{
+      background: "none", border: "none", cursor: "pointer", padding: 3,
+      color: danger ? COLORS.danger : colors.textDim, display: "flex", opacity: 0.8
+    }}>
+      {children}
+    </button>
+  );
+}
+
+function Modal({ children, onClose, colors, title }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: colors.bg2, borderRadius: 16, width: "100%", maxWidth: 460, maxHeight: "80vh",
+        display: "flex", flexDirection: "column", border: `1px solid ${colors.border}`
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottom: `1px solid ${colors.border}` }}>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>{title}</div>
+          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", color: colors.textDim, cursor: "pointer" }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: 16, overflowY: "auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsPanel({ colors, theme, setTheme, settings, setSettings, memoryEnabled, setMemoryEnabled, voices,
+  memory, setMemory, page, setPage, onExport, onShare, onEnableNotifications, onResetAll, onClose }) {
+
+  const menu = [
+    { key: "profile", icon: <User size={17} />, label: "Profile", sub: settings.profileName || "Not set" },
+    { key: "layout", icon: <SlidersHorizontal size={17} />, label: "Layout", sub: settings.layoutStyle === "minimal" ? "Minimal (new)" : "Classic" },
+    { key: "provider", icon: <Sparkles size={17} />, label: "AI provider",
+      sub: settings.useGemini && settings.geminiKey ? "Gemini (your key)" : settings.claudeKey ? "Claude (your key)" : "Not set up" },
+    { key: "appearance", icon: theme === "light" ? <Sun size={17} /> : theme === "system" ? <Monitor size={17} /> : <Moon size={17} />, label: "Color mode", sub: theme[0].toUpperCase() + theme.slice(1) },
+    { key: "font", icon: <Type size={17} />, label: "Font style", sub: settings.fontStyle[0].toUpperCase() + settings.fontStyle.slice(1) },
+    { key: "voice", icon: <Volume2 size={17} />, label: "Voice", sub: `${voices.length} voices on this device` },
+    { key: "capabilities", icon: <SlidersHorizontal size={17} />, label: "Capabilities",
+      sub: `${[settings.capImageGen, settings.capVoiceIn, settings.capVoiceOut, memoryEnabled].filter(Boolean).length} enabled` },
+    { key: "notifications", icon: <Bell size={17} />, label: "Notifications", sub: settings.notifyOnReply ? "On" : "Off" },
+    { key: "privacy", icon: <Shield size={17} />, label: "Privacy & memory", sub: null },
+    { key: "sharing", icon: <Share2 size={17} />, label: "Sharing", sub: null },
+  ];
+
+  const titles = {
+    main: "Settings", profile: "Profile", layout: "Layout", provider: "AI provider", appearance: "Color mode", font: "Font style", voice: "Voice",
+    capabilities: "Capabilities", notifications: "Notifications", privacy: "Privacy & memory", sharing: "Sharing",
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 50, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: colors.bg2 === COLORS.bgDark2 ? "rgba(18,18,31,0.92)" : "rgba(255,255,255,0.92)",
+        backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+        borderRadius: "22px 22px 0 0", width: "100%", maxWidth: 480, height: "82vh",
+        display: "flex", flexDirection: "column", border: `1px solid ${COLORS.violetSoft}`, borderBottom: "none",
+        boxShadow: `0 -10px 50px -12px ${COLORS.violetSoft}`
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 16, borderBottom: `1px solid ${COLORS.violetSoft}`, flexShrink: 0 }}>
+          {page !== "main" ? (
+            <button onClick={() => setPage("main")} aria-label="Back" style={{ background: "none", border: "none", color: colors.text, cursor: "pointer", display: "flex" }}><ArrowLeft size={19} /></button>
+          ) : <div style={{ width: 19 }} />}
+          <div style={{
+            fontWeight: 700, fontSize: 17, flex: 1, textAlign: "center", fontFamily: "'Fraunces', serif",
+            background: `linear-gradient(90deg, ${colors.text}, ${COLORS.violet2})`,
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text"
+          }}>{titles[page]}</div>
+          <button onClick={onClose} aria-label="Close settings" style={{ background: "none", border: "none", color: colors.textDim, cursor: "pointer", display: "flex" }}><X size={19} /></button>
+        </div>
+
+        <div style={{ padding: 16, overflowY: "auto", flex: 1 }}>
+          {page === "main" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {menu.map((item, i) => (
+                <button key={item.key} onClick={() => setPage(item.key)} style={{
+                  display: "flex", alignItems: "center", gap: 12,
+                  background: `linear-gradient(135deg, rgba(139,92,246,0.07), rgba(79,142,247,0.05))`,
+                  border: `1px solid ${COLORS.violetSoft}`,
+                  borderRadius: 14, padding: "13px 14px", cursor: "pointer", textAlign: "left", color: colors.text
+                }}>
+                  <span style={{
+                    width: 32, height: 32, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center",
+                    background: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})`, color: "#fff",
+                    boxShadow: `0 0 10px ${COLORS.violetSoft}`
+                  }}>{item.icon}</span>
+                  <span style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14.5 }}>{item.label}</div>
+                    {item.sub && <div style={{ fontSize: 12, color: colors.textDim, marginTop: 1 }}>{item.sub}</div>}
+                  </span>
+                  <ChevronRight size={16} color={colors.textDim} />
+                </button>
+              ))}
+              <div style={{ fontSize: 11.5, color: colors.textDim, textAlign: "center", marginTop: 14, lineHeight: 1.5 }}>
+                Nexa AI runs in this browser. There's no account system here, so nothing above touches billing or a server.
+              </div>
+            </div>
+          )}
+
+          {page === "profile" && (
+            <Section label="Display name">
+              <input value={settings.profileName} onChange={(e) => setSettings((s) => ({ ...s, profileName: e.target.value }))}
+                placeholder="What should Nexa call you?"
+                style={{ width: "100%", background: colors.bg3, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 10, color: colors.text, fontSize: 14 }} />
+              <div style={{ fontSize: 11.5, color: colors.textDim, marginTop: 8 }}>Stored only in this browser. Used nowhere else — there's no account behind this.</div>
+            </Section>
+          )}
+
+          {page === "layout" && (
+            <Section label="Home screen style">
+              <SegmentedControl options={[["minimal", "Minimal (new)"], ["classic", "Classic"]]}
+                value={settings.layoutStyle} onChange={(v) => setSettings((s) => ({ ...s, layoutStyle: v }))} colors={colors} />
+              <div style={{ fontSize: 11.5, color: colors.textDim, marginTop: 10, lineHeight: 1.6 }}>
+                <strong style={{ color: colors.text }}>Minimal</strong> — the cleaner layout: no Get Plus/Log in row, just the
+                compact quick-actions dock that you can hold and drag anywhere.<br /><br />
+                <strong style={{ color: colors.text }}>Classic</strong> — brings back the original header (Get Plus, Log in) and
+                the floating side dock.
+              </div>
+            </Section>
+          )}
+
+          {page === "provider" && (
+            <>
+              <div style={{ fontSize: 12, color: COLORS.violet2, background: "rgba(139,92,246,0.1)", border: `1px solid ${COLORS.violetSoft}`, borderRadius: 10, padding: 10, marginBottom: 14, lineHeight: 1.6 }}>
+                This is the standalone build — it has no server, so there's no free built-in chat here. Add one key below to enable chat.
+              </div>
+              <Section label="Your Anthropic (Claude) API key">
+                <input type="password" value={settings.claudeKey} onChange={(e) => setSettings((s) => ({ ...s, claudeKey: e.target.value, useGemini: false }))}
+                  placeholder="sk-ant-…" style={{ width: "100%", background: colors.bg3, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, padding: 10, fontSize: 13 }} />
+                <div style={{ fontSize: 11.5, color: colors.textDim, marginTop: 8, lineHeight: 1.6 }}>
+                  Get one at console.anthropic.com. Used automatically once entered, unless Gemini is toggled on below.
+                </div>
+              </Section>
+              <Section label="Chat model">
+                <ToggleRow label="Use Gemini instead of Claude" checked={settings.useGemini}
+                  onChange={(v) => setSettings((s) => ({ ...s, useGemini: v }))} colors={colors} />
+              </Section>
+              <Section label="Your Gemini API key">
+                <input type="password" value={settings.geminiKey} onChange={(e) => setSettings((s) => ({ ...s, geminiKey: e.target.value }))}
+                  placeholder="AIza…" style={{ width: "100%", background: colors.bg3, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, padding: 10, fontSize: 13 }} />
+                <div style={{ fontSize: 11.5, color: colors.textDim, marginTop: 8, lineHeight: 1.6 }}>
+                  Get a free key at aistudio.google.com/apikey. Used only when the toggle above is on.
+                </div>
+              </Section>
+              <div style={{ fontSize: 11, color: colors.textDim, marginTop: 4 }}>
+                Both keys are stored only in this browser (localStorage) and sent only to that provider, directly from your device — never to any Nexa server, because there isn't one.
+              </div>
+            </>
+          )}
+
+          {page === "appearance" && (
+            <Section label="Color mode">
+              <SegmentedControl options={[["dark", "Dark"], ["light", "Light"], ["system", "System"]]} value={theme} onChange={setTheme} colors={colors} />
+            </Section>
+          )}
+
+          {page === "font" && (
+            <Section label="Font style">
+              <SegmentedControl options={[["default", "Default"], ["serif", "Serif"], ["mono", "Mono"]]} value={settings.fontStyle} onChange={(v) => setSettings((s) => ({ ...s, fontStyle: v }))} colors={colors} />
+            </Section>
+          )}
+
+          {page === "voice" && (
+            <>
+              <Section label="Response style">
+                <SegmentedControl options={[["concise", "Concise"], ["balanced", "Balanced"], ["detailed", "Detailed"]]} value={settings.style} onChange={(v) => setSettings((s) => ({ ...s, style: v }))} colors={colors} />
+              </Section>
+              <Section label={`Temperature (${settings.temperature.toFixed(1)})`}>
+                <input type="range" min="0" max="1" step="0.1" value={settings.temperature}
+                  onChange={(e) => setSettings((s) => ({ ...s, temperature: parseFloat(e.target.value) }))} style={{ width: "100%" }} />
+              </Section>
+              <Section label="Playback">
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <ToggleRow label="Auto-play spoken replies" checked={settings.autoplay} onChange={(v) => setSettings((s) => ({ ...s, autoplay: v }))} colors={colors} />
+                  <div>
+                    <label style={{ fontSize: 12, color: colors.textDim }}>Voice ({voices.length} available on this device)</label>
+                    <select value={settings.voiceURI} onChange={(e) => setSettings((s) => ({ ...s, voiceURI: e.target.value }))}<option value="">Browser default</option>
+                      {voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>)}
+                    </select>
+                    {voices.length < 10 && (
+                      <div style={{ fontSize: 11, color: colors.textDim, marginTop: 5 }}>
+                        Only {voices.length} voice{voices.length === 1 ? "" : "s"} found — this list comes from your device/browser,
+                        not from Nexa. Installing more language voices in your phone's system settings will add more here automatically.
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: colors.textDim }}>Speech speed ({settings.rate.toFixed(1)}×)</label>
+                    <input type="range" min="0.5" max="1.8" step="0.1" value={settings.rate}
+                      onChange={(e) => setSettings((s) => ({ ...s, rate: parseFloat(e.target.value) }))} style={{ width: "100%" }} />
+                  </div>
+                </div>
+              </Section>
+              <Section label="Microphone input language">
+                <select value={settings.sttLang} onChange={(e) => setSettings((s) => ({ ...s, sttLang: e.target.value }))}
+                  style={{ width: "100%", background: colors.bg3, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, padding: 8, fontSize: 13 }}>
+                  {STT_LANGUAGES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+                </select>
+                <div style={{ fontSize: 11.5, color: colors.textDim, marginTop: 6 }}>
+                  {STT_LANGUAGES.length} languages — sets what the microphone listens for when you tap Call/mic.
+                </div>
+              </Section>
+              <Section label="Image generation">
+                <label style={{ fontSize: 12, color: colors.textDim, display: "block", marginBottom: 4 }}>Your OpenAI API key (optional)</label>
+                <input type="password" value={settings.openaiKey} onChange={(e) => setSettings((s) => ({ ...s, openaiKey: e.target.value }))}
+                  placeholder="sk-…" style={{ width: "100%", background: colors.bg3, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, padding: 8, fontSize: 13 }} />
+                <div style={{ fontSize: 11.5, color: colors.textDim, marginTop: 6, lineHeight: 1.5 }}>
+                  Stored only in this browser and sent only to OpenAI when you generate an image. Leave blank to use the free built-in generator.
+                </div>
+              </Section>
+            </>
+          )}
+
+          {page === "capabilities" && (
+            <Section label="Turn features on or off">
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <ToggleRow label="Memory" checked={memoryEnabled} onChange={setMemoryEnabled} colors={colors} />
+                <ToggleRow label="Image generation" checked={settings.capImageGen} onChange={(v) => setSettings((s) => ({ ...s, capImageGen: v }))} colors={colors} />
+                <ToggleRow label="Voice input (microphone)" checked={settings.capVoiceIn} onChange={(v) => setSettings((s) => ({ ...s, capVoiceIn: v }))} colors={colors} />
+                <ToggleRow label="Voice output (read aloud)" checked={settings.capVoiceOut} onChange={(v) => setSettings((s) => ({ ...s, capVoiceOut: v }))} colors={colors} />
+              </div>
+              <div style={{ fontSize: 11.5, color: colors.textDim, marginTop: 12 }}>
+                Each toggle actually gates that feature — turn one off and the related buttons stop working immediately.
+              </div>
+            </Section>
+          )}
+
+          {page === "notifications" && (
+            <Section label="Reply notifications">
+              <ToggleRow label="Notify me when a reply finishes" checked={settings.notifyOnReply}
+                onChange={async (v) => {
+                  if (v) { const ok = await onEnableNotifications(); if (!ok) return; }
+                  setSettings((s) => ({ ...s, notifyOnReply: v }));
+                }} colors={colors} />
+              <div style={{ fontSize: 11.5, color: colors.textDim, marginTop: 8, lineHeight: 1.5 }}>
+                Uses your browser's real notification permission — only fires while this tab is in the background.
+              </div>
+            </Section>
+          )}
+
+          {page === "privacy" && (
+            <>
+              <Section label="Memory">
+                <ToggleRow label="Let Nexa use saved memory in replies" checked={memoryEnabled} onChange={setMemoryEnabled} colors={colors} />
+                {memory.length === 0 && <div style={{ color: colors.textDim, fontSize: 13, marginTop: 10 }}>Nothing saved yet.</div>}
+                {memory.map((m) => (
+                  <div key={m.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "8px 0", borderBottom: `1px solid ${colors.border}` }}>
+                    <span style={{ fontSize: 13.5 }}>{m.text}</span>
+                    <button onClick={() => setMemory((prev) => prev.filter((x) => x.id !== m.id))} style={{ background: "none", border: "none", color: COLORS.danger, cursor: "pointer", flexShrink: 0 }}><Trash2 size={14} /></button>
+                  </div>
+                ))}
+              </Section>
+              <Section label="Local data">
+                <button onClick={onResetAll} style={{
+                  width: "100%", background: "none", border: `1px solid ${COLORS.danger}`, color: COLORS.danger,
+                  borderRadius: 10, padding: "10px 12px", fontSize: 13.5, cursor: "pointer"
+                }}>Clear all chats, memory & settings</button>
+                <div style={{ fontSize: 11.5, color: colors.textDim, marginTop: 8 }}>
+                  Everything here lives only in this browser — this deletes it for good, right now.
+                </div>
+              </Section>
+            </>
+          )}
+
+          {page === "sharing" && (
+            <Section label="This conversation">
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <button onClick={onExport} style={{ display: "flex", alignItems: "center", gap: 8, background: colors.bg3, border: "none", borderRadius: 10, padding: "10px 12px", color: colors.text, cursor: "pointer", fontSize: 13.5 }}>
+                  <Download size={15} /> Export as Markdown
+                </button>
+                <button onClick={onShare} style={{ display: "flex", alignItems: "center", gap: 8, background: colors.bg3, border: "none", borderRadius: 10, padding: "10px 12px", color: colors.text, cursor: "pointer", fontSize: 13.5 }}>
+                  <Share2 size={15} /> Share / copy conversation
+                </button>
+              </div>
+            </Section>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MemoryPanel({ colors, memory, setMemory, memoryEnabled, setMemoryEnabled, onClose }) {
+  const [note, setNote] = useState("");
+  return (
+    <Modal onClose={onClose} colors={colors} title="Memory">
+      <ToggleRow label="Memory enabled" checked={memoryEnabled} onChange={setMemoryEnabled} colors={colors} />
+      <div style={{ display: "flex", gap: 6, margin: "12px 0" }}>
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add something for Nexa to remember…"
+          style={{ flex: 1, background: colors.bg3, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 8, color: colors.text, fontSize: 13 }} />
+        <button onClick={() => { if (note.trim()) { setMemory((m) => [...m, { id: uid(), text: note.trim(), ts: now() }]); setNote(""); } }}
+          style={{ background: `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})`, border: "none", borderRadius: 8, padding: "0 12px", color: "#fff", cursor: "pointer" }}>Add</button>
+      </div>
+      {memory.length === 0 && <div style={{ color: colors.textDim, fontSize: 13 }}>Nothing saved yet.</div>}
+      {memory.map((m) => (
+        <div key={m.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "8px 0", borderBottom: `1px solid ${colors.border}` }}>
+          <span style={{ fontSize: 13.5 }}>{m.text}</span>
+          <button onClick={() => setMemory((prev) => prev.filter((x) => x.id !== m.id))} style={{ background: "none", border: "none", color: COLORS.danger, cursor: "pointer", flexShrink: 0 }}><Trash2 size={14} /></button>
+        </div>
+      ))}
+      {memory.length > 0 && (
+        <button onClick={() => setMemory([])} style={{ marginTop: 12, background: "none", border: `1px solid ${COLORS.danger}`, color: COLORS.danger, borderRadius: 8, padding: "6px 10px", fontSize: 12, cursor: "pointer" }}>
+          Clear all memory
+        </button>
+      )}
+    </Modal>
+  );
+}
+
+function Section({ label, children }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, opacity: 0.6, marginBottom: 8 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function SegmentedControl({ options, value, onChange, colors }) {
+  return (
+    <div style={{ display: "flex", background: colors.bg3, borderRadius: 10, padding: 3, gap: 3 }}>
+      {options.map(([v, l]) => (
+        <button key={v} onClick={() => onChange(v)} style={{
+          flex: 1, padding: "6px 8px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12.5,
+          background: value === v ? `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})` : "transparent",
+          color: value === v ? "#fff" : colors.text, fontWeight: value === v ? 600 : 400
+        }}>{l}</button>
+      ))}
+    </div>
+  );
+}
+
+function ToggleRow({ label, checked, onChange, colors }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <span style={{ fontSize: 13.5 }}>{label}</span>
+      <button onClick={() => onChange(!checked)} aria-pressed={checked} aria-label={label} style={{
+        width: 40, height: 22, borderRadius: 20, border: "none", cursor: "pointer",
+        background: checked ? `linear-gradient(135deg, ${COLORS.violet}, ${COLORS.violet2})` : colors.bg3,
+        position: "relative", flexShrink: 0, boxShadow: checked ? `0 0 10px ${COLORS.violetSoft}` : "none",
+        transition: "background 0.2s"
+      }}>
+        <span style={{
+          position: "absolute", top: 2, left: checked ? 20 : 2, width: 18, height: 18, borderRadius: 18,
+          background: "#fff", transition: "left 0.15s"
+        }} />
+      </button>
+    </div>
+  );
+}
+
+const rootEl = document.getElementById("root");
+ReactDOM.createRoot(rootEl).render(<NexaAI />);
+</script>
+</body>
+</html>
+                      style={{ width: "100%", marginTop: 4, background: colors.bg3, border: `1px solid ${colors.border}`, borderRadius: 8, color: colors.text, padding: 8 }}>
